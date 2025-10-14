@@ -220,7 +220,7 @@ export async function updateUser(
   return data as Analysis
 }*/
 
-export type CreateAnalysisInput = {
+/*export type CreateAnalysisInput = {
   userId: string;                 // uuid
   imageUrl: string;
   result: string;
@@ -400,6 +400,402 @@ export async function getPatientAnalyses(patientId: string): Promise<Analysis[]>
   }
 
   return (data as Analysis[]) || []
+}*/
+
+// Analyses
+export type CreateAnalysisInput = {
+  userId: string;                 // uuid
+  imageUrl: string;               // text
+  result: string;                 // text
+  confidence: number;             // double precision
+  aiRecommendation?: string | null;
+  patientName?: string | null;
+  patientAge?: number | null;     // integer
+  imageType?: "jpeg" | "png" | "pdf" | null;
+  patientId?: string | null;      // uuid (nullable)
+  severity?: "mild" | "moderate" | "severe" | null;
+};
+
+export async function createAnalysis(input: CreateAnalysisInput): Promise<Analysis> {
+  const supabase = await createServerClient();
+
+  const { data, error } = await supabase
+    .from("analyses")
+    .insert({
+      id: crypto.randomUUID(),
+      user_id: input.userId,
+      image_url: input.imageUrl,
+      diagnosis: input.result,
+      confidence: input.confidence,
+      severity: input.severity ?? null,
+      ai_recommendation: input.aiRecommendation ?? null,
+      patient_name: input.patientName ?? null,
+      patient_age: input.patientAge ?? null,
+      image_type: input.imageType ?? null,
+      patient_id: input.patientId ?? null,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error("[v0] Error creating analysis:", error);
+    throw new Error("Ошибка создания анализа");
+  }
+
+  return data as Analysis;
+}
+
+export async function getAnalysesByUser(userId: string): Promise<Analysis[]> {
+  const supabase = await createServerClient()
+
+  const { data, error } = await supabase
+    .from("analyses")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+
+  if (error) {
+    console.error("[v0] Error fetching analyses:", error)
+    return []
+  }
+
+  return (data as Analysis[]) || []
+}
+
+// Patients
+export async function createPatient(
+  doctorId: string,
+  patientData: {
+    name: string
+    age?: number
+    gender?: string
+    phone?: string
+    medical_history?: string
+    notes?: string
+  },
+): Promise<Patient> {
+  const supabase = await createServerClient()
+
+  const newPatient = {
+    id: crypto.randomUUID(),
+    doctor_id: doctorId,
+    name: patientData.name,
+    age: patientData.age || null,
+    gender: patientData.gender || null,
+    phone: patientData.phone || null,
+    medical_history: patientData.medical_history || null,
+    notes: patientData.notes || null,
+  }
+
+  const { data, error } = await supabase.from("patients").insert(newPatient).select().single()
+
+  if (error) {
+    console.error("[v0] Error creating patient:", error)
+    throw new Error("Ошибка создания пациента")
+  }
+
+  return data as Patient
+}
+
+export async function getPatientsByDoctor(doctorId: string): Promise<Patient[]> {
+  const supabase = await createServerClient()
+
+  const { data, error } = await supabase
+    .from("patients")
+    .select("*")
+    .eq("doctor_id", doctorId)
+    .order("created_at", { ascending: false })
+
+  if (error) {
+    console.error("[v0] Error fetching patients:", error)
+    return []
+  }
+
+  return (data as Patient[]) || []
+}
+
+export async function getPatientById(patientId: string): Promise<Patient | null> {
+  const supabase = await createServerClient()
+
+  const { data, error } = await supabase.from("patients").select("*").eq("id", patientId).single()
+
+  if (error || !data) {
+    return null
+  }
+
+  return data as Patient
+}
+
+export async function searchPatients(doctorId: string, searchTerm: string): Promise<Patient[]> {
+  const supabase = await createServerClient()
+
+  const { data, error } = await supabase
+    .from("patients")
+    .select("*")
+    .eq("doctor_id", doctorId)
+    .ilike("name", `%${searchTerm}%`)
+    .order("created_at", { ascending: false })
+
+  if (error) {
+    console.error("[v0] Error searching patients:", error)
+    return []
+  }
+
+  return (data as Patient[]) || []
+}
+
+export async function updatePatient(
+  patientId: string,
+  updates: Partial<Omit<Patient, "id" | "doctor_id" | "created_at">>,
+): Promise<Patient> {
+  const supabase = await createServerClient()
+
+  const { data, error } = await supabase
+    .from("patients")
+    .update({
+      ...updates,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", patientId)
+    .select()
+    .single()
+
+  if (error) {
+    console.error("[v0] Error updating patient:", error)
+    throw new Error("Ошибка обновления пациента")
+  }
+
+  return data as Patient
+}
+
+export async function getPatientAnalyses(patientId: string): Promise<Analysis[]> {
+  const supabase = await createServerClient()
+
+  const { data, error } = await supabase
+    .from("analyses")
+    .select("*")
+    .eq("patient_id", patientId)
+    .order("created_at", { ascending: false })
+
+  if (error) {
+    console.error("[v0] Error fetching patient analyses:", error)
+    return []
+  }
+
+  return (data as Analysis[]) || []
+}
+
+// Follow-Ups
+export async function createFollowUp(
+  doctorId: string,
+  patientId: string,
+  scheduledDate: string,
+  notes?: string,
+  analysisId?: string,
+): Promise<FollowUp> {
+  const supabase = await createServerClient()
+
+  const newFollowUp = {
+    id: crypto.randomUUID(),
+    doctor_id: doctorId,
+    patient_id: patientId,
+    analysis_id: analysisId || null,
+    scheduled_date: scheduledDate,
+    status: "scheduled" as const,
+    notes: notes || null,
+    outcome: null,
+  }
+
+  const { data, error } = await supabase.from("follow_ups").insert(newFollowUp).select().single()
+
+  if (error) {
+    console.error("[v0] Error creating follow-up:", error)
+    throw new Error("Ошибка создания записи на прием")
+  }
+
+  return data as FollowUp
+}
+
+export async function getFollowUpsByDoctor(doctorId: string): Promise<FollowUp[]> {
+  const supabase = await createServerClient()
+
+  const { data, error } = await supabase
+    .from("follow_ups")
+    .select("*")
+    .eq("doctor_id", doctorId)
+    .order("scheduled_date", { ascending: true })
+
+  if (error) {
+    console.error("[v0] Error fetching follow-ups:", error)
+    return []
+  }
+
+  return (data as FollowUp[]) || []
+}
+
+export async function getFollowUpsByPatient(patientId: string): Promise<FollowUp[]> {
+  const supabase = await createServerClient()
+
+  const { data, error } = await supabase
+    .from("follow_ups")
+    .select("*")
+    .eq("patient_id", patientId)
+    .order("scheduled_date", { ascending: false })
+
+  if (error) {
+    console.error("[v0] Error fetching patient follow-ups:", error)
+    return []
+  }
+
+  return (data as FollowUp[]) || []
+}
+
+export async function updateFollowUp(
+  followUpId: string,
+  updates: Partial<Omit<FollowUp, "id" | "doctor_id" | "patient_id" | "created_at">>,
+): Promise<FollowUp> {
+  const supabase = await createServerClient()
+
+  const { data, error } = await supabase
+    .from("follow_ups")
+    .update({
+      ...updates,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", followUpId)
+    .select()
+    .single()
+
+  if (error) {
+    console.error("[v0] Error updating follow-up:", error)
+    throw new Error("Ошибка обновления записи")
+  }
+
+  return data as FollowUp
+}
+
+export async function getUpcomingFollowUps(doctorId: string, days = 7): Promise<FollowUp[]> {
+  const supabase = await createServerClient()
+
+  const now = new Date()
+  const futureDate = new Date()
+  futureDate.setDate(futureDate.getDate() + days)
+
+  const { data, error } = await supabase
+    .from("follow_ups")
+    .select("*")
+    .eq("doctor_id", doctorId)
+    .eq("status", "scheduled")
+    .gte("scheduled_date", now.toISOString())
+    .lte("scheduled_date", futureDate.toISOString())
+    .order("scheduled_date", { ascending: true })
+
+  if (error) {
+    console.error("[v0] Error fetching upcoming follow-ups:", error)
+    return []
+  }
+
+  return (data as FollowUp[]) || []
+}
+
+// Statistics functions for dashboard analytics
+export async function getDoctorStatistics(doctorId: string): Promise<{
+  totalPatients: number
+  totalAnalyses: number
+  pneumoniaDetected: number
+  normalCases: number
+  analysesThisWeek: number
+  analysesThisMonth: number
+  recentAnalyses: Analysis[]
+}> {
+  const supabase = await createServerClient()
+
+  // Get total patients
+  const { count: totalPatients } = await supabase
+    .from("patients")
+    .select("*", { count: "exact", head: true })
+    .eq("doctor_id", doctorId)
+
+  // Get all analyses
+  const { data: allAnalyses } = await supabase
+    .from("analyses")
+    .select("*")
+    .eq("user_id", doctorId)
+    .order("created_at", { ascending: false })
+
+  const analyses = (allAnalyses as Analysis[]) || []
+
+  // Calculate statistics
+  const pneumoniaDetected = analyses.filter((a) => a.diagnosis.toLowerCase().includes("пневмония")).length
+  const normalCases = analyses.length - pneumoniaDetected
+
+  // This week
+  const oneWeekAgo = new Date()
+  oneWeekAgo.setDate(oneWeekAgo.getDate() - 7)
+  const analysesThisWeek = analyses.filter((a) => new Date(a.created_at) >= oneWeekAgo).length
+
+  // This month
+  const oneMonthAgo = new Date()
+  oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1)
+  const analysesThisMonth = analyses.filter((a) => new Date(a.created_at) >= oneMonthAgo).length
+
+  return {
+    totalPatients: totalPatients || 0,
+    totalAnalyses: analyses.length,
+    pneumoniaDetected,
+    normalCases,
+    analysesThisWeek,
+    analysesThisMonth,
+    recentAnalyses: analyses.slice(0, 10),
+  }
+}
+
+export async function getAnalysesTrend(
+  doctorId: string,
+  days = 30,
+): Promise<
+  Array<{
+    date: string
+    pneumonia: number
+    normal: number
+  }>
+> {
+  const supabase = await createServerClient()
+
+  const startDate = new Date()
+  startDate.setDate(startDate.getDate() - days)
+
+  const { data: analyses } = await supabase
+    .from("analyses")
+    .select("*")
+    .eq("user_id", doctorId)
+    .gte("created_at", startDate.toISOString())
+    .order("created_at", { ascending: true })
+
+  if (!analyses || analyses.length === 0) {
+    return []
+  }
+
+  // Group by date
+  const groupedByDate: Record<string, { pneumonia: number; normal: number }> = {}
+
+  analyses.forEach((analysis: any) => {
+    const date = new Date(analysis.created_at).toISOString().split("T")[0]
+    if (!groupedByDate[date]) {
+      groupedByDate[date] = { pneumonia: 0, normal: 0 }
+    }
+
+    if (analysis.diagnosis.toLowerCase().includes("пневмония")) {
+      groupedByDate[date].pneumonia++
+    } else {
+      groupedByDate[date].normal++
+    }
+  })
+
+  return Object.entries(groupedByDate).map(([date, counts]) => ({
+    date,
+    ...counts,
+  }))
 }
 
 

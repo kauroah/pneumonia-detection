@@ -10,7 +10,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ImageUpload } from "@/components/image-upload"
 import { AnalysisResultCard } from "@/components/analysis-result"
 import { AIChat } from "@/components/ai-chat"
-import { LogOut, Activity, Loader2, User, Users } from "lucide-react"
+import { SidebarNav } from "@/components/sidebar-nav"
+import { Activity, Loader2 } from "lucide-react"
 import type { AnalysisResult } from "@/lib/db-types"
 
 export default function DashboardPage() {
@@ -131,39 +132,9 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-secondary/5">
-      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
-              <Activity className="w-5 h-5 text-primary-foreground" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold">Диагностика пневмонии</h1>
-              <p className="text-xs text-muted-foreground">Система анализа рентгеновских снимков</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => router.push("/patients")}>
-              <Users className="w-4 h-4 mr-2" />
-              Пациенты
-            </Button>
-            <Button variant="outline" onClick={() => router.push("/history")}>
-              <Activity className="w-4 h-4 mr-2" />
-              История
-            </Button>
-            <Button variant="outline" onClick={() => router.push("/profile")}>
-              <User className="w-4 h-4 mr-2" />
-              Профиль
-            </Button>
-            <Button variant="outline" onClick={handleLogout}>
-              <LogOut className="w-4 h-4 mr-2" />
-              {translations.logout}
-            </Button>
-          </div>
-        </div>
-      </header>
+      <SidebarNav userName={user.full_name} />
 
-      <main className="container mx-auto px-4 py-8">
+      <main className="ml-64 transition-all duration-300 p-8">
         <div className="grid lg:grid-cols-2 gap-6">
           <Card>
             <CardHeader>

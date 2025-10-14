@@ -6,13 +6,16 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { LogOut, Activity, Loader2, User, ArrowLeft, Search, Calendar, FileText } from "lucide-react"
+import { Checkbox } from "@/components/ui/checkbox"
+import { LogOut, Activity, Loader2, User, ArrowLeft, Search, Calendar, FileText, GitCompare } from "lucide-react"
 import type { Analysis } from "@/lib/db-types"
+import { getSeverityBadgeText, getSeverityColor } from "@/lib/severity-classifier"
 
 export default function HistoryPage() {
   const [analyses, setAnalyses] = useState<Analysis[]>([])
   const [filteredAnalyses, setFilteredAnalyses] = useState<Analysis[]>([])
   const [searchQuery, setSearchQuery] = useState("")
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [authError, setAuthError] = useState(false)
@@ -73,6 +76,18 @@ export default function HistoryPage() {
     })
   }
 
+  const toggleSelection = (id: string) => {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]))
+  }
+
+  const handleCompare = () => {
+    if (selectedIds.length < 2) {
+      alert("Выберите минимум 2 анализа для сравнения")
+      return
+    }
+    router.push(`/compare?ids=${selectedIds.join(",")}`)
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -108,11 +123,17 @@ export default function HistoryPage() {
               <Activity className="w-5 h-5 text-primary-foreground" />
             </div>
             <div>
-              <h1 className="text-xl font-bold">История пациентов</h1>
+              <h1 className="text-xl font-bold">История анализов</h1>
               <p className="text-xs text-muted-foreground">Все диагнозы и анализы</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {selectedIds.length > 0 && (
+              <Button onClick={handleCompare} disabled={selectedIds.length < 2}>
+                <GitCompare className="w-4 h-4 mr-2" />
+                Сравнить ({selectedIds.length})
+              </Button>
+            )}
             <Button variant="outline" onClick={() => router.push("/dashboard")}>
               <ArrowLeft className="w-4 h-4 mr-2" />
               Назад
@@ -133,7 +154,7 @@ export default function HistoryPage() {
         <Card className="mb-6">
           <CardHeader>
             <CardTitle>Поиск по пациентам</CardTitle>
-            <CardDescription>Найдите анализы по имени пациента</CardDescription>
+            <CardDescription>Найдите анализы по имени пациента или выберите для сравнения</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="relative">
@@ -162,68 +183,80 @@ export default function HistoryPage() {
             filteredAnalyses.map((analysis) => (
               <Card key={analysis.id} className="hover:shadow-md transition-shadow">
                 <CardContent className="p-6">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div className="flex-1 space-y-3">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          {analysis.patient_id ? (
-                            <button
-                              onClick={() => router.push(`/patients/${analysis.patient_id}`)}
-                              className="font-semibold text-lg hover:text-primary transition-colors text-left"
-                            >
-                              {analysis.patient_name || "Имя не указано"}
-                            </button>
-                          ) : (
-                            <h3 className="font-semibold text-lg">{analysis.patient_name || "Имя не указано"}</h3>
-                          )}
-                          <p className="text-sm text-muted-foreground">
-                            Возраст: {analysis.patient_age || "Не указан"}
-                          </p>
+                  <div className="flex items-start gap-4">
+                    <Checkbox
+                      checked={selectedIds.includes(analysis.id)}
+                      onCheckedChange={() => toggleSelection(analysis.id)}
+                      className="mt-1"
+                    />
+
+                    <div className="flex-1 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div className="flex-1 space-y-3">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            {analysis.patient_id ? (
+                              <button
+                                onClick={() => router.push(`/patients/${analysis.patient_id}`)}
+                                className="font-semibold text-lg hover:text-primary transition-colors text-left"
+                              >
+                                {analysis.patient_name || "Имя не указано"}
+                              </button>
+                            ) : (
+                              <h3 className="font-semibold text-lg">{analysis.patient_name || "Имя не указано"}</h3>
+                            )}
+                            <p className="text-sm text-muted-foreground">
+                              Возраст: {analysis.patient_age || "Не указан"}
+                            </p>
+                          </div>
+                          <div className="flex flex-col gap-2 items-end ml-2">
+                            <Badge variant={analysis.diagnosis === "PNEUMONIA" ? "destructive" : "default"}>
+                              {analysis.diagnosis === "PNEUMONIA" ? "Пневмония" : "Норма"}
+                            </Badge>
+                            {analysis.diagnosis === "PNEUMONIA" && analysis.severity && (
+                              <Badge variant={getSeverityColor(analysis.severity) as any}>
+                                {getSeverityBadgeText(analysis.severity)}
+                              </Badge>
+                            )}
+                          </div>
                         </div>
-                        <Badge
-                          variant={analysis.diagnosis === "PNEUMONIA" ? "destructive" : "default"}
-                          className="ml-2"
-                        >
-                          {analysis.diagnosis === "PNEUMONIA" ? "Пневмония" : "Норма"}
-                        </Badge>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                          <div className="flex items-center gap-2">
+                            <Calendar className="w-4 h-4 text-muted-foreground" />
+                            <span className="text-muted-foreground">{formatDate(analysis.created_at)}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Уверенность: </span>
+                            <span className="font-medium">{(analysis.confidence * 100).toFixed(1)}%</span>
+                          </div>
+                        </div>
+
+                        {analysis.ai_recommendation && (
+                          <div className="pt-2 border-t">
+                            <p className="text-sm font-medium mb-1">Рекомендации ИИ:</p>
+                            <p className="text-sm text-muted-foreground line-clamp-2">{analysis.ai_recommendation}</p>
+                          </div>
+                        )}
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-                        <div className="flex items-center gap-2">
-                          <Calendar className="w-4 h-4 text-muted-foreground" />
-                          <span className="text-muted-foreground">{formatDate(analysis.created_at)}</span>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Уверенность: </span>
-                          <span className="font-medium">{(analysis.confidence * 100).toFixed(1)}%</span>
-                        </div>
+                      <div className="flex flex-col gap-2">
+                        {analysis.image_url && (
+                          <img
+                            src={analysis.image_url || "/placeholder.svg"}
+                            alt="X-ray"
+                            className="w-full md:w-32 h-32 object-cover rounded-lg border"
+                          />
+                        )}
+                        {analysis.patient_id && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => router.push(`/patients/${analysis.patient_id}`)}
+                          >
+                            Профиль пациента
+                          </Button>
+                        )}
                       </div>
-
-                      {analysis.ai_recommendation && (
-                        <div className="pt-2 border-t">
-                          <p className="text-sm font-medium mb-1">Рекомендации ИИ:</p>
-                          <p className="text-sm text-muted-foreground line-clamp-2">{analysis.ai_recommendation}</p>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex flex-col gap-2">
-                      {analysis.image_url && (
-                        <img
-                          src={analysis.image_url || "/placeholder.svg"}
-                          alt="X-ray"
-                          className="w-full md:w-32 h-32 object-cover rounded-lg border"
-                        />
-                      )}
-                      {analysis.patient_id && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => router.push(`/patients/${analysis.patient_id}`)}
-                        >
-                          Профиль пациента
-                        </Button>
-                      )}
                     </div>
                   </div>
                 </CardContent>

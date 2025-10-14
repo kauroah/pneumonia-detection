@@ -2,8 +2,7 @@ export const runtime = "nodejs"; // IMPORTANT: enable Node APIs & native addons
 import { type NextRequest, NextResponse } from "next/server"
 import { getUserBySession, createAnalysis } from "@/lib/file-storage"
 import { runInference, convertPdfToImage } from "@/lib/model-inference"
-import { generateText } from "ai";
-import { deepseek } from "@ai-sdk/deepseek";
+import { classifySeverity, getSeverityDetails } from "@/lib/severity-classifier"
 import path from "path"
 import { cookies } from "next/headers"
 import { llm } from "@/lib/llm";
@@ -131,7 +130,8 @@ const formData = await request.formData()
     const publicUrl = await uploadImageToStorage(
       user.id,
       processed,
-      "image/jpeg"
+      "image/jpeg",
+      "jpg"
     )
 
     // Путь к модели
@@ -141,9 +141,14 @@ const formData = await request.formData()
     // Инференс по ОТКОРРЕКТИРОВАННОМУ буферу (processed)
     const inferenceResult = await runInference(processed, modelPath)
 
+    const severity = classifySeverity(inferenceResult.diagnosis, inferenceResult.confidence)
+    const severityDetails = getSeverityDetails(severity)
+
     const recommendation = await generateAIRecommendation(
       inferenceResult.diagnosis,
-      inferenceResult.confidence
+      inferenceResult.confidence,
+      severity,
+      severityDetails,
     )
 
    /* await createAnalysis(
@@ -158,21 +163,25 @@ const formData = await request.formData()
       isPdf ? "pdf" : "jpeg"
     )*/
 
-await createAnalysis({
-  userId: user.id,
-  imageUrl: publicUrl,
-  result: inferenceResult.diagnosis,
-  confidence: inferenceResult.confidence,
-  aiRecommendation: recommendation,
-  patientName: patientName || null,
-  patientAge: patientAge ? Number.parseInt(patientAge) : undefined,
-  imageType: isPdf ? "pdf" : "jpeg",
-  patientId: patientId || null,
-})
+  const analysis = await createAnalysis({
+    userId: user.id,
+    imageUrl: publicUrl,
+    result: inferenceResult.diagnosis,
+    confidence: inferenceResult.confidence,
+    aiRecommendation: recommendation,
+    patientName: patientName || null,
+    patientAge: patientAge ? Number.parseInt(patientAge) : null,
+    imageType: isPdf ? "pdf" : "jpeg",
+    patientId: patientId || null,   // make sure analyses.patient_id is UUID (nullable)
+    severity,                       // "mild" | "moderate" | "severe" | null
+  });
 
     return NextResponse.json({
+      id: analysis.id,
       diagnosis: inferenceResult.diagnosis,
       confidence: inferenceResult.confidence,
+      severity: severity,
+      severityDetails: severityDetails,
       recommendation,
       imageUrl: publicUrl,
     })
@@ -182,18 +191,31 @@ await createAnalysis({
   }
 }
 
-async function generateAIRecommendation(diagnosis: string, confidence: number): Promise<string> {
+async function generateAIRecommendation(
+  diagnosis: string, 
+  confidence: number,
+  severity: "mild" | "moderate" | "severe" | null,
+  severityDetails: any,
+): Promise<string> {
   try {
     const prompt =
       diagnosis === "PNEUMONIA"
-        ? `Вы медицинский ИИ-ассистент. Создайте подробный план лечения для пациента с диагнозом пневмония (уверенность ${confidence.toFixed(1)}%). 
-    
-Включите:
-1. Рекомендации по немедленным действиям
+        ? `Вы медицинский ИИ-ассистент. Создайте подробный план лечения для пациента с диагнозом пневмония.
+
+Параметры:
+- Уверенность диагноза: ${confidence.toFixed(1)}%
+- Степень тяжести: ${severityDetails.description}
+- Уровень срочности: ${severityDetails.urgency === "high" ? "Высокий" : severityDetails.urgency === "medium" ? "Средний" : "Низкий"}
+
+Базовые рекомендации:
+${severityDetails.recommendations.map((r: string) => `- ${r}`).join("\n")}
+
+Создайте детальный план, включающий:
+1. Немедленные действия с учетом степени тяжести
 2. Необходимые дополнительные анализы
-3. Варианты лечения
-4. Рекомендации по уходу
-5. Когда нужен контрольный осмотр
+3. Варианты лечения (медикаментозное и поддерживающее)
+4. Рекомендации по уходу и режиму
+5. График контрольных осмотров
 
 Напишите на русском языке. Будьте профессиональны и напомните, что окончательное решение принимает врач.`
         : `Вы медицинский ИИ-ассистент. Пневмония не обнаружена (уверенность ${confidence.toFixed(1)}%). 
@@ -216,7 +238,7 @@ async function generateAIRecommendation(diagnosis: string, confidence: number): 
 
     const { text } = await llm().gen({
     prompt,
-    maxOutputTokens: 400,
+    maxOutputTokens: 15000,
     temperature: 0.5,
   });
 
@@ -224,7 +246,10 @@ async function generateAIRecommendation(diagnosis: string, confidence: number): 
     return text
   } catch (error) {
     console.error("AI recommendation error:", error)
-    // Fallback to basic recommendation
+    // Fallback to basic recommendation with severity
+    if (diagnosis === "PNEUMONIA" && severity) {
+      return `Обнаружены признаки пневмонии (${severityDetails.description}) с уверенностью ${confidence.toFixed(1)}%. ${severityDetails.recommendations.join(". ")}`
+    }
     return diagnosis === "PNEUMONIA"
       ? `Обнаружены признаки пневмонии с уверенностью ${confidence.toFixed(1)}%. Требуется консультация врача.`
       : `Признаков пневмонии не обнаружено. Продолжайте следить за здоровьем легких.`
