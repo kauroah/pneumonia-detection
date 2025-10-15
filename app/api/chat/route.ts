@@ -1,54 +1,49 @@
-//import { convertToModelMessages, streamText, type UIMessage } from "ai"
-//import { deepseek } from "@ai-sdk/deepseek";
 import { convertToModelMessages, type UIMessage } from "ai";
 import { llm } from "@/lib/llm";
 
-export const maxDuration = 30
+export const maxDuration = 30;
 
 export async function POST(req: Request) {
-  const { messages, diagnosis, confidence }: { messages: UIMessage[]; diagnosis: string; confidence: number } =
-    await req.json()
+  const {
+    messages,
+    diagnosis,
+    confidence,
+  }: { messages: UIMessage[]; diagnosis: string; confidence: number } = await req.json();
 
-  const systemPrompt = `Вы - медицинский ИИ-ассистент, специализирующийся на пневмонии и здоровье легких. 
-Вы помогаете врачам и медсестрам в российских медицинских центрах.
+  // --- System style guard: RU only, clinical tone, no markdown/tables/emojis/slang
+  const systemPrompt = `
+Вы — клинический ИИ-ассистент по пульмонологии. Вы отвечаете кратко, профессионально и на русском языке.
+Формат И ВСЕ ПРАВИЛА (СТРОГО):
+- Без Markdown, таблиц, смайлов и декоративных символов. Только обычный текст.
+- Без пустой болтовни и вступлений. Сразу по делу.
+- Структура по умолчанию:
+Оценка:
+План:
+Контроль и наблюдение:
+Красные флаги:
+Памятка:
+- Если нужно уточнение, задайте 1–3 конкретных вопроса в конце блока "Уточните:" — тоже обычным текстом.
+- При пневмонии — давайте практичные рекомендации (амбулаторно vs стационар, антибиотики как классы/линии без назначения доз), поддержка, мониторинг, когда пересмотреть терапию.
+- При норме — профилактика, мониторинг симптомов, когда обращаться.
+- Напоминайте, что окончательное решение принимает врач.
+- Запрещены конкретные назначения доз/схем; описывайте варианты и классы препаратов, критерии выбора, необходимость очной оценки.
 
-Контекст текущего пациента:
-- Диагноз: ${diagnosis}
-- Уверенность модели: ${confidence.toFixed(1)}%
-
-Ваши обязанности:
-1. Предоставлять подробные планы лечения для пациентов с пневмонией
-2. Давать рекомендации по профилактике для здоровых пациентов
-3. Отвечать на вопросы о симптомах, лечении и уходе
-4. Всегда напоминать, что окончательное решение принимает врач
-
-ВАЖНО: 
-- Отвечайте ТОЛЬКО на русском языке
-- Будьте профессиональны и точны
-- Используйте медицинскую терминологию, но объясняйте сложные термины
-- Всегда подчеркивайте важность консультации с врачом`
+Контекст пациента:
+Диагноз модели: ${diagnosis}
+Уверенность модели: ${confidence.toFixed(1)}%
+`.trim();
 
   const prompt = convertToModelMessages([
-    {
-      id: "system",
-      role: "system",
-      parts: [{ type: "text", text: systemPrompt }],
-    },
+    { id: "system", role: "system", parts: [{ type: "text", text: systemPrompt }] },
     ...messages,
-  ])
+  ]);
 
-  /*const result = streamText({
-    model: deepseek("deepseek-chat"),
+  // Более детерминированный ответ, без "воды"
+  const result = llm().stream({
     messages: prompt,
-    temperature: 0.7,
-    maxOutputTokens: 2000,
-  })*/
-
-    const result = llm().stream({
-    messages: prompt,
-    temperature: 0.7,
-    maxOutputTokens: 1500,
+    temperature: 0.3,
+    maxOutputTokens: 900,
   });
 
-  return result.toUIMessageStreamResponse()
+  return result.toUIMessageStreamResponse();
 }

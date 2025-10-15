@@ -37,7 +37,7 @@ export function SidebarNav({ userName }: SidebarNavProps) {
     { icon: Activity, label: "История", path: "/history" },
     { icon: TrendingUp, label: "Статистика", path: "/statistics" },
     { icon: Calendar, label: "Приемы", path: "/follow-ups" },
-    { icon: MessageSquare, label: "Второе мнение", path: "/second-opinions" },
+    { icon: MessageSquare, label: "Консультация", path: "/second-opinions" },
     { icon: User, label: "Профиль", path: "/profile" },
   ]
 
