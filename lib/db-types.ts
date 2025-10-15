@@ -74,3 +74,71 @@ export interface SecondOpinion {
   reviewed_at: string | null
   updated_at: string
 }
+
+export interface MedicalRecord {
+  id: string
+  patient_id: string
+  doctor_id: string
+  record_type:
+    | "blood_test"
+    | "lab_result"
+    | "imaging"
+    | "vital_signs"
+    | "medication"
+    | "allergy"
+    | "condition"
+    | "other"
+  record_date: string
+  title: string
+
+  // Blood test results
+  wbc_count?: number | null
+  rbc_count?: number | null
+  hemoglobin?: number | null
+  hematocrit?: number | null
+  platelet_count?: number | null
+  neutrophils?: number | null
+  lymphocytes?: number | null
+
+  // Inflammatory markers
+  crp?: number | null
+  esr?: number | null
+  procalcitonin?: number | null
+
+  // Respiratory function
+  spo2?: number | null
+  respiratory_rate?: number | null
+
+  // Vital signs
+  temperature?: number | null
+  heart_rate?: number | null
+  blood_pressure_systolic?: number | null
+  blood_pressure_diastolic?: number | null
+
+  // Additional data
+  findings?: string | null
+  notes?: string | null
+  file_url?: string | null
+
+  comorbidities?: string[] | null
+  current_medications?: string[] | null
+  allergies?: string[] | null
+  smoking_status?: "never" | "former" | "current" | null
+  smoking_pack_years?: number | null
+  alcohol_use?: "none" | "occasional" | "moderate" | "heavy" | null
+  recent_travel?: string | null
+  environmental_exposures?: string | null
+  vaccination_history?: {
+    flu?: { date: string; type: string }[]
+    pneumococcal?: { date: string; type: string }[]
+    covid?: { date: string; type: string }[]
+    other?: { name: string; date: string }[]
+  } | null
+  immunosuppressed?: boolean | null
+  recent_hospitalization?: boolean | null
+  recent_antibiotics?: boolean | null
+
+  created_at: string
+  updated_at: string
+}
+

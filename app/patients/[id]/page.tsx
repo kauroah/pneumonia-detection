@@ -2,11 +2,15 @@
 
 import { useEffect, useState } from "react"
 import { useRouter, useParams } from "next/navigation"
-import { ArrowLeft, Calendar, Phone, FileText, Activity, Edit } from "lucide-react"
+import { ArrowLeft, Calendar, Phone, FileText, Activity, Edit, Plus, Database } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import type { Patient, Analysis } from "@/lib/db-types"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { MedicalRecordForm } from "@/components/medical-record-form"
+import { MedicalRecordCard } from "@/components/medical-record-card"
+import type { Patient, Analysis, MedicalRecord } from "@/lib/db-types"
 
 export default function PatientDetailPage() {
   const router = useRouter()
@@ -15,7 +19,9 @@ export default function PatientDetailPage() {
 
   const [patient, setPatient] = useState<Patient | null>(null)
   const [analyses, setAnalyses] = useState<Analysis[]>([])
+  const [medicalRecords, setMedicalRecords] = useState<MedicalRecord[]>([])
   const [loading, setLoading] = useState(true)
+  const [showAddRecordDialog, setShowAddRecordDialog] = useState(false)
 
   useEffect(() => {
     fetchPatientData()
@@ -23,15 +29,24 @@ export default function PatientDetailPage() {
 
   const fetchPatientData = async () => {
     try {
-      const response = await fetch(`/api/patients/${patientId}`)
-      const data = await response.json()
+      const [patientResponse, recordsResponse] = await Promise.all([
+        fetch(`/api/patients/${patientId}`),
+        fetch(`/api/medical-records?patientId=${patientId}`),
+      ])
 
-      if (response.ok) {
+      if (patientResponse.ok) {
+        const data = await patientResponse.json()
         setPatient(data.patient)
         setAnalyses(data.analyses)
       } else {
+        const data = await patientResponse.json()
         alert(data.error || "Ошибка при загрузке данных пациента")
         router.push("/patients")
+      }
+
+      if (recordsResponse.ok) {
+        const recordsData = await recordsResponse.json()
+        setMedicalRecords(recordsData.records || [])
       }
     } catch (error) {
       console.error("Error fetching patient:", error)
@@ -44,6 +59,11 @@ export default function PatientDetailPage() {
   const getGenderLabel = (gender: string | null) => {
     if (!gender) return "Не указан"
     return gender === "male" ? "Мужской" : gender === "female" ? "Женский" : "Другой"
+  }
+
+  const handleRecordCreated = () => {
+    setShowAddRecordDialog(false)
+    fetchPatientData()
   }
 
   if (loading) {
@@ -135,64 +155,132 @@ export default function PatientDetailPage() {
           </div>
 
           <div className="lg:col-span-2">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Activity className="w-5 h-5" />
+            <Tabs defaultValue="knowledge-base" className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="knowledge-base">
+                  <Database className="w-4 h-4 mr-2" />
+                  База знаний
+                </TabsTrigger>
+                <TabsTrigger value="analyses">
+                  <Activity className="w-4 h-4 mr-2" />
                   История анализов
-                </CardTitle>
-                <CardDescription>Все диагностические исследования пациента</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {analyses.length === 0 ? (
-                  <div className="text-center py-12">
-                    <FileText className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                    <p className="text-muted-foreground">У этого пациента пока нет анализов</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {analyses.map((analysis) => (
-                      <Card key={analysis.id}>
-                        <CardContent className="pt-6">
-                          <div className="flex items-start justify-between mb-4">
-                            <div>
-                              <div className="flex items-center gap-2 mb-2">
-                                <Badge variant={analysis.diagnosis === "PNEUMONIA" ? "destructive" : "default"}>
-                                  {analysis.diagnosis === "PNEUMONIA" ? "Пневмония" : "Норма"}
-                                </Badge>
-                                <span className="text-sm text-muted-foreground">
-                                  {(analysis.confidence * 100).toFixed(1)}% уверенность
-                                </span>
-                              </div>
-                              <p className="text-sm text-muted-foreground">
-                                {new Date(analysis.created_at).toLocaleString("ru-RU")}
-                              </p>
-                            </div>
-                            {analysis.image_url && (
-                              <img
-                                src={analysis.image_url || "/placeholder.svg"}
-                                alt="X-ray"
-                                className="w-20 h-20 object-cover rounded-lg border"
-                              />
-                            )}
-                          </div>
+                </TabsTrigger>
+              </TabsList>
 
-                          {analysis.ai_recommendation && (
-                            <div className="bg-muted p-3 rounded-lg">
-                              <p className="text-sm font-medium mb-1">Рекомендации ИИ:</p>
-                              <p className="text-sm text-muted-foreground">{analysis.ai_recommendation}</p>
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+              <TabsContent value="knowledge-base" className="mt-6">
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="flex items-center gap-2">
+                          <Database className="w-5 h-5" />
+                          База знаний пациента
+                        </CardTitle>
+                        <CardDescription>Полная медицинская история и результаты анализов</CardDescription>
+                      </div>
+                      <Button onClick={() => setShowAddRecordDialog(true)}>
+                        <Plus className="w-4 h-4 mr-2" />
+                        Добавить запись
+                      </Button>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {medicalRecords.length === 0 ? (
+                      <div className="text-center py-12">
+                        <Database className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                        <p className="text-muted-foreground mb-4">
+                          База знаний пуста. Добавьте медицинские записи для отслеживания истории болезни.
+                        </p>
+                        <Button onClick={() => setShowAddRecordDialog(true)}>
+                          <Plus className="w-4 h-4 mr-2" />
+                          Добавить первую запись
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {medicalRecords.map((record) => (
+                          <MedicalRecordCard key={record.id} record={record} />
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="analyses" className="mt-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Activity className="w-5 h-5" />
+                      История анализов
+                    </CardTitle>
+                    <CardDescription>Все диагностические исследования пациента</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {analyses.length === 0 ? (
+                      <div className="text-center py-12">
+                        <FileText className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                        <p className="text-muted-foreground">У этого пациента пока нет анализов</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {analyses.map((analysis) => (
+                          <Card key={analysis.id}>
+                            <CardContent className="pt-6">
+                              <div className="flex items-start justify-between mb-4">
+                                <div>
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <Badge variant={analysis.diagnosis === "PNEUMONIA" ? "destructive" : "default"}>
+                                      {analysis.diagnosis === "PNEUMONIA" ? "Пневмония" : "Норма"}
+                                    </Badge>
+                                    <span className="text-sm text-muted-foreground">
+                                      {(analysis.confidence * 100).toFixed(1)}% уверенность
+                                    </span>
+                                  </div>
+                                  <p className="text-sm text-muted-foreground">
+                                    {new Date(analysis.created_at).toLocaleString("ru-RU")}
+                                  </p>
+                                </div>
+                                {analysis.image_url && (
+                                  <img
+                                    src={analysis.image_url || "/placeholder.svg"}
+                                    alt="X-ray"
+                                    className="w-20 h-20 object-cover rounded-lg border"
+                                  />
+                                )}
+                              </div>
+
+                              {analysis.ai_recommendation && (
+                                <div className="bg-muted p-3 rounded-lg">
+                                  <p className="text-sm font-medium mb-1">Рекомендации ИИ:</p>
+                                  <p className="text-sm text-muted-foreground">{analysis.ai_recommendation}</p>
+                                </div>
+                              )}
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
           </div>
         </div>
       </div>
+
+      <Dialog open={showAddRecordDialog} onOpenChange={setShowAddRecordDialog}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Добавить медицинскую запись</DialogTitle>
+          </DialogHeader>
+          <MedicalRecordForm
+            patientId={patientId}
+            onSuccess={handleRecordCreated}
+            onCancel={() => setShowAddRecordDialog(false)}
+          />
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
