@@ -1,6 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { cookies } from "next/headers"
-import { getUserBySession, getDoctorStatistics, getAnalysesTrend } from "@/lib/file-storage"
+import {
+  getUserBySession,
+  getDoctorStatistics,
+  getAnalysesTrend,
+  getAnalysesTrendWithSeverity,
+} from "@/lib/file-storage"
 
 export async function GET(request: NextRequest) {
   try {
@@ -21,10 +26,12 @@ export async function GET(request: NextRequest) {
 
     const statistics = await getDoctorStatistics(user.id)
     const trend = await getAnalysesTrend(user.id, days)
+    const trendWithSeverity = await getAnalysesTrendWithSeverity(user.id, days)
 
     return NextResponse.json({
       statistics,
       trend,
+      trendWithSeverity,
     })
   } catch (error) {
     console.error("Statistics error:", error)
