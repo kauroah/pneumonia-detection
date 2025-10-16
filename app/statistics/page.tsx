@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -19,36 +19,60 @@ import {
 } from "recharts"
 
 export default function StatisticsPage() {
-  const [statistics, setStatistics] = useState<any>(null)
-  const [trend, setTrend] = useState<any[]>([])
-  const [trendWithSeverity, setTrendWithSeverity] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
+  const [statistics, setStatistics] = useState<any>(null)            // summary (stable)
+  const [trendWithSeverity, setTrendWithSeverity] = useState<any[]>([]) // charts data
+  const [chartsLoading, setChartsLoading] = useState(false)          // only charts
   const [days, setDays] = useState(30)
   const router = useRouter()
+  const abortRef = useRef<AbortController | null>(null)
 
+  // 1) Fetch summary once (no days dependency)
   useEffect(() => {
-    fetchStatistics()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [days])
-
-  const fetchStatistics = async () => {
-    try {
-      setLoading(true)
-      const response = await fetch(`/api/statistics?days=${days}`)
-      if (!response.ok) throw new Error("Failed to fetch statistics")
-
-      const data = await response.json()
-      setStatistics(data.statistics)
-      setTrend(data.trend)
-      setTrendWithSeverity(data.trendWithSeverity)
-    } catch (error) {
-      console.error("Failed to fetch statistics:", error)
-    } finally {
-      setLoading(false)
+    const run = async () => {
+      try {
+        const r = await fetch(`/api/statistics?days=${30}`) // or call /api/statistics/summary if you split backend
+        if (!r.ok) throw new Error("Failed to fetch statistics")
+        const data = await r.json()
+        setStatistics(data.statistics)
+        setTrendWithSeverity(data.trendWithSeverity) // initial
+      } catch (e) {
+        console.error("Failed to fetch initial statistics:", e)
+      }
     }
-  }
+    run()
+  }, [])
 
-  if (loading || !statistics) {
+  // 2) Only refetch charts when days changes
+  useEffect(() => {
+    if (!statistics) return // wait until summary is loaded
+    setChartsLoading(true)
+
+    // cancel previous in-flight fetch
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    const run = async () => {
+      try {
+        const r = await fetch(`/api/statistics?days=${days}`, { signal: controller.signal })
+        if (!r.ok) throw new Error("Failed to fetch trend")
+        const data = await r.json()
+        setTrendWithSeverity(data.trendWithSeverity)
+      } catch (e: any) {
+        if (e?.name !== "AbortError") {
+          console.error("Failed to fetch trend:", e)
+        }
+      } finally {
+        if (!controller.signal.aborted) setChartsLoading(false)
+      }
+    }
+    run()
+
+    return () => controller.abort()
+  }, [days, statistics])
+
+  if (!statistics) {
+    // Only for the very first load of the summary
     return (
       <div className="min-h-screen flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -59,7 +83,7 @@ export default function StatisticsPage() {
   const detectionRate =
     statistics.totalAnalyses > 0 ? ((statistics.pneumoniaDetected / statistics.totalAnalyses) * 100).toFixed(1) : 0
 
-  // Aggregate severities if backend doesn't provide totals
+  // Aggregate severities as fallback if backend didn’t send precomputed totals
   const totals = trendWithSeverity.reduce(
     (acc, d) => {
       acc.normal += Number(d?.normal || 0)
@@ -76,11 +100,22 @@ export default function StatisticsPage() {
   const moderateTotal = statistics.pneumoniaModerate ?? totals.moderate
   const severeTotal = statistics.pneumoniaSevere ?? totals.severe
 
-  // Grouped bars (not stacked): Норма + три колонки тяжести
+  // Grouped bars: Норма + три колонки тяжести
   const diagnosesData = [
     { name: "Норма", normal: normalTotal, mild: 0, moderate: 0, severe: 0 },
     { name: "Пневмония", normal: 0, mild: mildTotal, moderate: moderateTotal, severe: severeTotal },
   ]
+
+  // Small overlay loader for charts (non-blocking)
+  const ChartOverlay = () =>
+    chartsLoading ? (
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+        <div className="rounded-md bg-background/70 px-2 py-1 text-xs text-muted-foreground flex items-center gap-2">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Обновление графиков…
+        </div>
+      </div>
+    ) : null
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-secondary/5">
@@ -110,7 +145,7 @@ export default function StatisticsPage() {
       </header>
 
       <main className="container mx-auto px-4 py-8 space-y-6">
-        {/* Key Metrics */}
+        {/* Key Metrics (static while charts revalidate) */}
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -157,97 +192,104 @@ export default function StatisticsPage() {
           </Card>
         </div>
 
-        {/* Динамика пневмонии по степени тяжести — только линии, без синей заливки */}
-        <Card>
+        {/* Динамика диагностических случаев (норма + степени пневмонии) */}
+        <Card className="relative">
           <CardHeader>
-           <CardTitle>Динамика диагностических случаев</CardTitle>
-           <CardDescription>Изменение количества нормальных и пневмонических случаев</CardDescription>
+            <CardTitle>Динамика диагностических случаев</CardTitle>
+            <CardDescription>Изменение количества нормальных и пневмонических случаев</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={350}>
-              <LineChart data={trendWithSeverity}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Line type="monotone" dataKey="normal" name="Норма" stroke="#3b82f6" strokeWidth={2} dot={{ r: 2 }} />
-                <Line type="monotone" dataKey="mild" name="Лёгкая" stroke="#10b981" strokeWidth={2} dot={{ r: 2 }} />
-                <Line type="monotone" dataKey="moderate" name="Средняя" stroke="#f59e0b" strokeWidth={2} dot={{ r: 2 }} />
-                <Line type="monotone" dataKey="severe" name="Тяжёлая" stroke="#ef4444" strokeWidth={2} dot={{ r: 2 }} />
-              </LineChart>
-            </ResponsiveContainer>
+            <div className="relative">
+              <ResponsiveContainer width="100%" height={350}>
+                <LineChart data={trendWithSeverity}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Line type="monotone" dataKey="normal" name="Норма" stroke="#3b82f6" strokeWidth={2} dot={{ r: 2 }} />
+                  <Line type="monotone" dataKey="mild" name="Лёгкая" stroke="#10b981" strokeWidth={2} dot={{ r: 2 }} />
+                  <Line type="monotone" dataKey="moderate" name="Средняя" stroke="#f59e0b" strokeWidth={2} dot={{ r: 2 }} />
+                  <Line type="monotone" dataKey="severe" name="Тяжёлая" stroke="#ef4444" strokeWidth={2} dot={{ r: 2 }} />
+                </LineChart>
+              </ResponsiveContainer>
+              <ChartOverlay />
+            </div>
           </CardContent>
         </Card>
 
-        <Card>
+        {/* Динамика пневмонии по степени тяжести (только степени) */}
+        <Card className="relative">
           <CardHeader>
             <CardTitle>Динамика пневмонии по степени тяжести</CardTitle>
-            <CardDescription>Распределение случаев пневмонии по степени тяжести</CardDescription>
+            <CardDescription>Распределение случаев пневмонии по степеням тяжести</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={350}>
-              <LineChart data={trendWithSeverity}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Line type="monotone" dataKey="mild" stroke="#10b981" name="Легкая" strokeWidth={2} />
-                <Line type="monotone" dataKey="moderate" stroke="#f59e0b" name="Средняя" strokeWidth={2} />
-                <Line type="monotone" dataKey="severe" stroke="#ef4444" name="Тяжелая" strokeWidth={2} />
-              </LineChart>
-            </ResponsiveContainer>
+            <div className="relative">
+              <ResponsiveContainer width="100%" height={350}>
+                <LineChart data={trendWithSeverity}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Line type="monotone" dataKey="mild" stroke="#10b981" name="Лёгкая" strokeWidth={2} />
+                  <Line type="monotone" dataKey="moderate" stroke="#f59e0b" name="Средняя" strokeWidth={2} />
+                  <Line type="monotone" dataKey="severe" stroke="#ef4444" name="Тяжёлая" strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+              <ChartOverlay />
+            </div>
           </CardContent>
         </Card>
 
-        {/* Динамика диагностики (Пневмония vs Норма) */}
-        <Card>
+        {/* Динамика диагностики: Пневмония vs Норма */}
+        <Card className="relative">
           <CardHeader>
             <CardTitle>Динамика диагностики</CardTitle>
             <CardDescription>Сравнение случаев пневмонии и нормы</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={350}>
-              <LineChart data={trendWithSeverity}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Line type="monotone" dataKey="pneumonia" stroke="#ef4444" name="Пневмония" strokeWidth={2} />
-                <Line type="monotone" dataKey="normal" stroke="#3b82f6" name="Норма" strokeWidth={2} />
-              </LineChart>
-            </ResponsiveContainer>
+            <div className="relative">
+              <ResponsiveContainer width="100%" height={350}>
+                <LineChart data={trendWithSeverity}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Line type="monotone" dataKey="pneumonia" stroke="#ef4444" name="Пневмония" strokeWidth={2} />
+                  <Line type="monotone" dataKey="normal" stroke="#3b82f6" name="Норма" strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+              <ChartOverlay />
+            </div>
           </CardContent>
         </Card>
 
-        {/* Распределение диагнозов — ГРУППИРОВАННЫЕ КОЛОНКИ (не стек) */}
-        <Card>
+        {/* Распределение диагнозов — группированные колонки */}
+        <Card className="relative">
           <CardHeader>
             <CardTitle>Распределение диагнозов</CardTitle>
             <CardDescription>Соотношение выявленных случаев пневмонии и нормы</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={350}>
-              <BarChart
-                data={diagnosesData}
-                barCategoryGap="35%"   // расстояние между группами
-                barGap={6}             // расстояние между колонками внутри группы
-              >
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
-                <YAxis allowDecimals={false} />
-                <Tooltip />
-                <Legend />
-
-                {/* Четыре отдельные колонки (без stackId) — будут стоять рядом в группе */}
-                <Bar dataKey="normal"   name="Норма"                fill="#3b82f6" />
-                <Bar dataKey="mild"     name="Пневмония — лёгкая"  fill="#10b981" />
-                <Bar dataKey="moderate" name="Пневмония — средняя" fill="#f59e0b" />
-                <Bar dataKey="severe"   name="Пневмония — тяжёлая" fill="#ef4444" />
-              </BarChart>
-            </ResponsiveContainer>
+            <div className="relative">
+              <ResponsiveContainer width="100%" height={350}>
+                <BarChart data={diagnosesData} barCategoryGap="35%" barGap={6}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="normal"   name="Норма"                fill="#3b82f6" />
+                  <Bar dataKey="mild"     name="Пневмония — лёгкая"  fill="#10b981" />
+                  <Bar dataKey="moderate" name="Пневмония — средняя" fill="#f59e0b" />
+                  <Bar dataKey="severe"   name="Пневмония — тяжёлая" fill="#ef4444" />
+                </BarChart>
+              </ResponsiveContainer>
+              <ChartOverlay />
+            </div>
           </CardContent>
         </Card>
       </main>
