@@ -142,3 +142,15 @@ export interface MedicalRecord {
   updated_at: string
 }
 
+export interface AIMedicalAnalysis {
+  id: string
+  patient_id: string
+  doctor_id: string
+  analysis_text: string
+  medical_records_count: number
+  risk_level?: "low" | "moderate" | "high" | "critical" | null
+  key_findings?: string[] | null
+  recommended_actions?: string[] | null
+  created_at: string
+  updated_at: string
+}

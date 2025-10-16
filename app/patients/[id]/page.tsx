@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { MedicalRecordForm } from "@/components/medical-record-form"
 import { MedicalRecordCard } from "@/components/medical-record-card"
+import { MedicalAIAnalysis } from "@/components/medical-ai-analysis"
 import type { Patient, Analysis, MedicalRecord } from "@/lib/db-types"
 
 export default function PatientDetailPage() {
@@ -168,43 +169,47 @@ export default function PatientDetailPage() {
               </TabsList>
 
               <TabsContent value="knowledge-base" className="mt-6">
-                <Card>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <CardTitle className="flex items-center gap-2">
-                          <Database className="w-5 h-5" />
-                          База знаний пациента
-                        </CardTitle>
-                        <CardDescription>Полная медицинская история и результаты анализов</CardDescription>
-                      </div>
-                      <Button onClick={() => setShowAddRecordDialog(true)}>
-                        <Plus className="w-4 h-4 mr-2" />
-                        Добавить запись
-                      </Button>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    {medicalRecords.length === 0 ? (
-                      <div className="text-center py-12">
-                        <Database className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                        <p className="text-muted-foreground mb-4">
-                          База знаний пуста. Добавьте медицинские записи для отслеживания истории болезни.
-                        </p>
+                <div className="space-y-6">
+                  <MedicalAIAnalysis patientId={patientId} hasRecords={medicalRecords.length > 0} />
+
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <CardTitle className="flex items-center gap-2">
+                            <Database className="w-5 h-5" />
+                            База знаний пациента
+                          </CardTitle>
+                          <CardDescription>Полная медицинская история и результаты анализов</CardDescription>
+                        </div>
                         <Button onClick={() => setShowAddRecordDialog(true)}>
                           <Plus className="w-4 h-4 mr-2" />
-                          Добавить первую запись
+                          Добавить запись
                         </Button>
                       </div>
-                    ) : (
-                      <div className="space-y-4">
-                        {medicalRecords.map((record) => (
-                          <MedicalRecordCard key={record.id} record={record} />
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+                    </CardHeader>
+                    <CardContent>
+                      {medicalRecords.length === 0 ? (
+                        <div className="text-center py-12">
+                          <Database className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                          <p className="text-muted-foreground mb-4">
+                            База знаний пуста. Добавьте медицинские записи для отслеживания истории болезни.
+                          </p>
+                          <Button onClick={() => setShowAddRecordDialog(true)}>
+                            <Plus className="w-4 h-4 mr-2" />
+                            Добавить первую запись
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          {medicalRecords.map((record) => (
+                            <MedicalRecordCard key={record.id} record={record} />
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
               </TabsContent>
 
               <TabsContent value="analyses" className="mt-6">

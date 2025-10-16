@@ -111,7 +111,7 @@ export default function SecondOpinionsPage() {
       <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-10">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-bold">Второе мнение</h1>
+            <h1 className="text-xl font-bold">Консультация</h1>
             <p className="text-xs text-muted-foreground">Запросы на консультацию коллег</p>
           </div>
           <Button variant="outline" onClick={() => router.push("/dashboard")}>
@@ -133,7 +133,7 @@ export default function SecondOpinionsPage() {
               <Card className="border-dashed">
                 <CardContent className="flex flex-col items-center justify-center py-12 text-center">
                   <UserCheck className="w-12 h-12 text-muted-foreground mb-4" />
-                  <p className="text-sm text-muted-foreground">Вы еще не запрашивали второе мнение</p>
+                  <p className="text-sm text-muted-foreground">Вы еще не запрашивали консультацию</p>
                 </CardContent>
               </Card>
             ) : (

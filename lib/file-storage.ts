@@ -1,24 +1,128 @@
-import type { User, Analysis } from "./db-types"
-import { createServerClient } from "./supabase/server"
-interface Session {
-  id: string
-  user_id: string
-  expires_at: string
-  created_at?: string
+// lib/file-storage.ts
+import type { User, Analysis, Patient, FollowUp } from "./db-types";
+import { createServerClient } from "./supabase/server";
+
+/** ---------- helpers ---------- */
+function isPneumoniaDiagnosis(val?: string | null): boolean {
+  if (!val) return false;
+  const v = val.trim().toUpperCase();
+  // Support canonical EN + legacy RU just in case.
+  return v === "PNEUMONIA" || v === "ПНЕВМОНИЯ";
 }
 
-// Users
-export async function createUser(email: string, password: string, fullName: string, role: string): Promise<User> {
-  const supabase = await createServerClient()
+/** Simple (demo) password hashing — replace with bcrypt/argon2 in production. */
+async function hashPassword(password: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password + "salt_secret_key");
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function verifyPassword(password: string, hash: string): Promise<boolean> {
+  const passwordHash = await hashPassword(password);
+  return passwordHash === hash;
+}
 
-  // Check if user exists
-  const { data: existingUser } = await supabase.from("users").select("id").eq("email", email).single()
+/** ---------- sessions ---------- */
+interface Session {
+  id: string;
+  user_id: string;
+  expires_at: string;
+  created_at?: string;
+}
 
-  if (existingUser) {
-    throw new Error("Пользователь уже существует")
+export async function createSession(userId: string): Promise<string> {
+  const supabase = await createServerClient();
+  const sessionId = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
+
+  const { error } = await supabase.from("sessions").insert({
+    id: sessionId,
+    user_id: userId,
+    expires_at: expiresAt,
+  });
+
+  if (error) {
+    console.error("Error creating session:", error);
+    throw new Error("Ошибка создания сессии");
   }
 
-  const passwordHash = await hashPassword(password)
+  console.log("Session created:", sessionId, "for user:", userId);
+  return sessionId;
+}
+
+export async function getSession(sessionId: string): Promise<Session | null> {
+  const supabase = await createServerClient();
+
+  const { data: session, error } = await supabase
+    .from("sessions")
+    .select("*")
+    .eq("id", sessionId)
+    .single();
+
+  if (error || !session) {
+    console.log("Session not found:", sessionId);
+    return null;
+  }
+
+  if (new Date(session.expires_at) < new Date()) {
+    console.log("Session expired:", sessionId);
+    await deleteSession(sessionId);
+    return null;
+  }
+
+  console.log("Session found:", sessionId, "for user:", session.user_id);
+  return session as Session;
+}
+
+export async function deleteSession(sessionId: string) {
+  const supabase = await createServerClient();
+  await supabase.from("sessions").delete().eq("id", sessionId);
+}
+
+export async function getUserBySession(sessionId: string): Promise<User | null> {
+  const session = await getSession(sessionId);
+  if (!session) {
+    console.log("No session found for:", sessionId);
+    return null;
+  }
+
+  const supabase = await createServerClient();
+  const { data: user, error } = await supabase
+    .from("users")
+    .select("*")
+    .eq("id", session.user_id)
+    .single();
+
+  if (error || !user) {
+    console.log("No user found for session:", sessionId);
+    return null;
+  }
+
+  console.log("User found for session:", user.email);
+  return user as User;
+}
+
+/** ---------- users ---------- */
+export async function createUser(
+  email: string,
+  password: string,
+  fullName: string,
+  role: string
+): Promise<User> {
+  const supabase = await createServerClient();
+
+  const { data: existingUser } = await supabase
+    .from("users")
+    .select("id")
+    .eq("email", email)
+    .single();
+
+  if (existingUser) {
+    throw new Error("Пользователь уже существует");
+  }
+
+  const passwordHash = await hashPassword(password);
 
   const newUser: Omit<User, "created_at" | "updated_at"> = {
     id: crypto.randomUUID(),
@@ -26,118 +130,39 @@ export async function createUser(email: string, password: string, fullName: stri
     password_hash: passwordHash,
     full_name: fullName,
     role,
-  }
+  };
 
-  const { data, error } = await supabase.from("users").insert(newUser).select().single()
-
+  const { data, error } = await supabase.from("users").insert(newUser).select().single();
   if (error) {
-    console.error("Error creating user:", error)
-    throw new Error("Ошибка создания пользователя")
+    console.error("Error creating user:", error);
+    throw new Error("Ошибка создания пользователя");
   }
-
-  return data as User
+  return data as User;
 }
 
 export async function authenticateUser(email: string, password: string): Promise<User | null> {
-  const supabase = await createServerClient()
+  const supabase = await createServerClient();
 
-  const { data: user, error } = await supabase.from("users").select("*").eq("email", email).single()
+  const { data: user, error } = await supabase.from("users").select("*").eq("email", email).single();
+  if (error || !user) return null;
 
-  if (error || !user) {
-    return null
-  }
+  const isValid = await verifyPassword(password, user.password_hash);
+  if (!isValid) return null;
 
-  const isValid = await verifyPassword(password, user.password_hash)
-  if (!isValid) {
-    return null
-  }
-
-  return user as User
-}
-
-// Sessions
-export async function createSession(userId: string): Promise<string> {
-  const supabase = await createServerClient()
-
-  const sessionId = crypto.randomUUID()
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() // 7 days
-
-  const { error } = await supabase.from("sessions").insert({
-    id: sessionId,
-    user_id: userId,
-    expires_at: expiresAt,
-  })
-
-  if (error) {
-    console.error("Error creating session:", error)
-    throw new Error("Ошибка создания сессии")
-  }
-
-  console.log("Session created:", sessionId, "for user:", userId)
-  return sessionId
-}
-
-export async function getSession(sessionId: string): Promise<Session | null> {
-  const supabase = await createServerClient()
-
-  const { data: session, error } = await supabase.from("sessions").select("*").eq("id", sessionId).single()
-
-  if (error || !session) {
-    console.log("Session not found:", sessionId)
-    return null
-  }
-
-  // Check if expired
-  if (new Date(session.expires_at) < new Date()) {
-    console.log("Session expired:", sessionId)
-    await deleteSession(sessionId)
-    return null
-  }
-
-  console.log("Session found:", sessionId, "for user:", session.user_id)
-  return session as Session
-}
-
-export async function deleteSession(sessionId: string) {
-  const supabase = await createServerClient()
-  await supabase.from("sessions").delete().eq("id", sessionId)
-}
-
-export async function getUserBySession(sessionId: string): Promise<User | null> {
-  const session = await getSession(sessionId)
-  if (!session) {
-    console.log("No session found for:", sessionId)
-    return null
-  }
-
-  const supabase = await createServerClient()
-  const { data: user, error } = await supabase.from("users").select("*").eq("id", session.user_id).single()
-
-  if (error || !user) {
-    console.log("No user found for session:", sessionId)
-    return null
-  }
-
-  console.log("User found for session:", user.email)
-  return user as User
+  return user as User;
 }
 
 export async function getUserByEmail(email: string): Promise<User | null> {
-  const supabase = await createServerClient()
-  const { data: user, error } = await supabase.from("users").select("*").eq("email", email).single()
-
-  if (error || !user) {
-    return null
-  }
-
-  return user as User
+  const supabase = await createServerClient();
+  const { data: user } = await supabase.from("users").select("*").eq("email", email).single();
+  return (user as User) || null;
 }
 
 export async function updateUser(
   userId: string,
-  updates: { full_name?: string; email?: string; password_hash?: string },
+  updates: { full_name?: string; email?: string; password_hash?: string }
 ): Promise<void> {
-  const supabase = await createServerClient()
+  const supabase = await createServerClient();
 
   const { error } = await supabase
     .from("users")
@@ -145,274 +170,25 @@ export async function updateUser(
       ...updates,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", userId)
+    .eq("id", userId);
 
   if (error) {
-    console.error("Error updating user:", error)
-    throw new Error("Ошибка обновления пользователя")
+    console.error("Error updating user:", error);
+    throw new Error("Ошибка обновления пользователя");
   }
 }
 
-// Analyses
-/*export async function createAnalysis(
-  userId: string,
-  imageUrl: string,
-  result: string,
-  confidence: number,
-  aiRecommendation?: string,
-  patientName?: string,
-  patientAge?: number,
-  imageType?: string,
-): Promise<Analysis> {
-  const supabase = await createServerClient()
-
-  const newAnalysis = {
-    id: crypto.randomUUID(),
-    user_id: userId,
-    image_url: imageUrl,
-    diagnosis: result,
-    confidence,
-    ai_recommendation: aiRecommendation,
-    patient_name: patientName,
-    patient_age: patientAge,
-    image_type: imageType,
-  }
-
-  const { data, error } = await supabase.from("analyses").insert(newAnalysis).select().single()
-
-  if (error) {
-    console.error("[v0] Error creating analysis:", error)
-    throw new Error("Ошибка создания анализа")
-  }
-
-  return data as Analysis
-}*/
-
-/*export async function createAnalysis(input: {
-  userId: string;
-  imageUrl: string;
-  result: string;
-  confidence: number;
-  aiRecommendation?: string | null;
-  patientName?: string | null;
-  patientAge?: number | null;
-  imageType?: string | null;
-  patientId?: string | null;
-}): Promise<Analysis> {
-  const supabase = await createServerClient()
-  const { data, error } = await supabase
-    .from("analyses")
-    .insert({
-      id: crypto.randomUUID(),
-      user_id: input.userId,
-      image_url: input.imageUrl,
-      diagnosis: input.result,
-      confidence: input.confidence,
-      ai_recommendation: input.aiRecommendation ?? null,
-      patient_name: input.patientName ?? null,
-      patient_age: input.patientAge ?? null,
-      image_type: input.imageType ?? null,
-      patient_id: input.patientId ?? null,
-    })
-    .select()
-    .single()
-  if (error) throw new Error("Ошибка создания анализа")
-  return data as Analysis
-}*/
-
-/*export type CreateAnalysisInput = {
-  userId: string;                 // uuid
-  imageUrl: string;
-  result: string;
-  confidence: number;
-  aiRecommendation?: string | null;
-  patientName?: string | null;
-  patientAge?: number | null;
-  imageType?: "jpeg" | "png" | "pdf" | null;
-  patientId?: string | null;      // uuid
-};
-
-export async function createAnalysis(input: CreateAnalysisInput): Promise<Analysis> {
-  const supabase = await createServerClient();
-
-  const { data, error } = await supabase
-    .from("analyses")
-    .insert({
-      id: crypto.randomUUID(),
-      user_id: input.userId,
-      image_url: input.imageUrl,
-      diagnosis: input.result,
-      confidence: input.confidence,
-      ai_recommendation: input.aiRecommendation ?? null,
-      patient_name: input.patientName ?? null,
-      patient_age: input.patientAge ?? null,
-      image_type: input.imageType ?? null,
-      patient_id: input.patientId ?? null,
-    })
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error creating analysis:", error);
-    throw new Error("Ошибка создания анализа");
-  }
-  return data as Analysis;
-}
-
-
-
-export async function getAnalysesByUser(userId: string): Promise<Analysis[]> {
-  const supabase = await createServerClient()
-
-  const { data, error } = await supabase
-    .from("analyses")
-    .select("*")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-
-  if (error) {
-    console.error("Error fetching analyses:", error)
-    return []
-  }
-
-  return (data as Analysis[]) || []
-}
-
-
-// Patients
-export async function createPatient(
-  doctorId: string,
-  patientData: {
-    name: string
-    age?: number
-    gender?: string
-    phone?: string
-    medical_history?: string
-    notes?: string
-  },
-): Promise<Patient> {
-  const supabase = await createServerClient()
-
-  const newPatient = {
-    id: crypto.randomUUID(),
-    doctor_id: doctorId,
-    name: patientData.name,
-    age: patientData.age || null,
-    gender: patientData.gender || null,
-    phone: patientData.phone || null,
-    medical_history: patientData.medical_history || null,
-    notes: patientData.notes || null,
-  }
-
-  const { data, error } = await supabase.from("patients").insert(newPatient).select().single()
-
-  if (error) {
-    console.error("Error creating patient:", error)
-    throw new Error("Ошибка создания пациента")
-  }
-
-  return data as Patient
-}
-
-export async function getPatientsByDoctor(doctorId: string): Promise<Patient[]> {
-  const supabase = await createServerClient()
-
-  const { data, error } = await supabase
-    .from("patients")
-    .select("*")
-    .eq("doctor_id", doctorId)
-    .order("created_at", { ascending: false })
-
-  if (error) {
-    console.error("Error fetching patients:", error)
-    return []
-  }
-
-  return (data as Patient[]) || []
-}
-
-export async function getPatientById(patientId: string): Promise<Patient | null> {
-  const supabase = await createServerClient()
-
-  const { data, error } = await supabase.from("patients").select("*").eq("id", patientId).single()
-
-  if (error || !data) {
-    return null
-  }
-
-  return data as Patient
-}
-
-export async function searchPatients(doctorId: string, searchTerm: string): Promise<Patient[]> {
-  const supabase = await createServerClient()
-
-  const { data, error } = await supabase
-    .from("patients")
-    .select("*")
-    .eq("doctor_id", doctorId)
-    .ilike("name", `%${searchTerm}%`)
-    .order("created_at", { ascending: false })
-
-  if (error) {
-    console.error("Error searching patients:", error)
-    return []
-  }
-
-  return (data as Patient[]) || []
-}
-
-export async function updatePatient(
-  patientId: string,
-  updates: Partial<Omit<Patient, "id" | "doctor_id" | "created_at">>,
-): Promise<Patient> {
-  const supabase = await createServerClient()
-
-  const { data, error } = await supabase
-    .from("patients")
-    .update({
-      ...updates,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", patientId)
-    .select()
-    .single()
-
-  if (error) {
-    console.error("Error updating patient:", error)
-    throw new Error("Ошибка обновления пациента")
-  }
-
-  return data as Patient
-}
-
-export async function getPatientAnalyses(patientId: string): Promise<Analysis[]> {
-  const supabase = await createServerClient()
-
-  const { data, error } = await supabase
-    .from("analyses")
-    .select("*")
-    .eq("patient_id", patientId)
-    .order("created_at", { ascending: false })
-
-  if (error) {
-    console.error("Error fetching patient analyses:", error)
-    return []
-  }
-
-  return (data as Analysis[]) || []
-}*/
-
-// Analyses
+/** ---------- analyses ---------- */
 export type CreateAnalysisInput = {
-  userId: string;                 // uuid
-  imageUrl: string;               // text
-  result: string;                 // text
-  confidence: number;             // double precision
+  userId: string; // uuid
+  imageUrl: string;
+  result: string; // "PNEUMONIA" | "NORMAL"
+  confidence: number;
   aiRecommendation?: string | null;
   patientName?: string | null;
-  patientAge?: number | null;     // integer
+  patientAge?: number | null;
   imageType?: "jpeg" | "png" | "pdf" | null;
-  patientId?: string | null;      // uuid (nullable)
+  patientId?: string | null; // uuid (nullable)
   severity?: "mild" | "moderate" | "severe" | null;
 };
 
@@ -438,43 +214,41 @@ export async function createAnalysis(input: CreateAnalysisInput): Promise<Analys
     .single();
 
   if (error) {
-    console.error("[v0] Error creating analysis:", error);
+    console.error("Error creating analysis:", error);
     throw new Error("Ошибка создания анализа");
   }
-
   return data as Analysis;
 }
 
 export async function getAnalysesByUser(userId: string): Promise<Analysis[]> {
-  const supabase = await createServerClient()
+  const supabase = await createServerClient();
 
   const { data, error } = await supabase
     .from("analyses")
     .select("*")
     .eq("user_id", userId)
-    .order("created_at", { ascending: false })
+    .order("created_at", { ascending: false });
 
   if (error) {
-    console.error("[v0] Error fetching analyses:", error)
-    return []
+    console.error("[v0] Error fetching analyses:", error);
+    return [];
   }
-
-  return (data as Analysis[]) || []
+  return (data as Analysis[]) || [];
 }
 
-// Patients
+/** ---------- patients ---------- */
 export async function createPatient(
   doctorId: string,
   patientData: {
-    name: string
-    age?: number
-    gender?: string
-    phone?: string
-    medical_history?: string
-    notes?: string
-  },
+    name: string;
+    age?: number;
+    gender?: string;
+    phone?: string;
+    medical_history?: string;
+    notes?: string;
+  }
 ): Promise<Patient> {
-  const supabase = await createServerClient()
+  const supabase = await createServerClient();
 
   const newPatient = {
     id: crypto.randomUUID(),
@@ -485,70 +259,62 @@ export async function createPatient(
     phone: patientData.phone || null,
     medical_history: patientData.medical_history || null,
     notes: patientData.notes || null,
-  }
+  };
 
-  const { data, error } = await supabase.from("patients").insert(newPatient).select().single()
-
+  const { data, error } = await supabase.from("patients").insert(newPatient).select().single();
   if (error) {
-    console.error("[v0] Error creating patient:", error)
-    throw new Error("Ошибка создания пациента")
+    console.error("Error creating patient:", error);
+    throw new Error("Ошибка создания пациента");
   }
-
-  return data as Patient
+  return data as Patient;
 }
 
 export async function getPatientsByDoctor(doctorId: string): Promise<Patient[]> {
-  const supabase = await createServerClient()
+  const supabase = await createServerClient();
 
   const { data, error } = await supabase
     .from("patients")
     .select("*")
     .eq("doctor_id", doctorId)
-    .order("created_at", { ascending: false })
+    .order("created_at", { ascending: false });
 
   if (error) {
-    console.error("[v0] Error fetching patients:", error)
-    return []
+    console.error("Error fetching patients:", error);
+    return [];
   }
-
-  return (data as Patient[]) || []
+  return (data as Patient[]) || [];
 }
 
 export async function getPatientById(patientId: string): Promise<Patient | null> {
-  const supabase = await createServerClient()
+  const supabase = await createServerClient();
 
-  const { data, error } = await supabase.from("patients").select("*").eq("id", patientId).single()
-
-  if (error || !data) {
-    return null
-  }
-
-  return data as Patient
+  const { data, error } = await supabase.from("patients").select("*").eq("id", patientId).single();
+  if (error || !data) return null;
+  return data as Patient;
 }
 
 export async function searchPatients(doctorId: string, searchTerm: string): Promise<Patient[]> {
-  const supabase = await createServerClient()
+  const supabase = await createServerClient();
 
   const { data, error } = await supabase
     .from("patients")
     .select("*")
     .eq("doctor_id", doctorId)
     .ilike("name", `%${searchTerm}%`)
-    .order("created_at", { ascending: false })
+    .order("created_at", { ascending: false });
 
   if (error) {
-    console.error("[v0] Error searching patients:", error)
-    return []
+    console.error("Error searching patients:", error);
+    return [];
   }
-
-  return (data as Patient[]) || []
+  return (data as Patient[]) || [];
 }
 
 export async function updatePatient(
   patientId: string,
-  updates: Partial<Omit<Patient, "id" | "doctor_id" | "created_at">>,
+  updates: Partial<Omit<Patient, "id" | "doctor_id" | "created_at">>
 ): Promise<Patient> {
-  const supabase = await createServerClient()
+  const supabase = await createServerClient();
 
   const { data, error } = await supabase
     .from("patients")
@@ -558,42 +324,40 @@ export async function updatePatient(
     })
     .eq("id", patientId)
     .select()
-    .single()
+    .single();
 
   if (error) {
-    console.error("[v0] Error updating patient:", error)
-    throw new Error("Ошибка обновления пациента")
+    console.error("Error updating patient:", error);
+    throw new Error("Ошибка обновления пациента");
   }
-
-  return data as Patient
+  return data as Patient;
 }
 
 export async function getPatientAnalyses(patientId: string): Promise<Analysis[]> {
-  const supabase = await createServerClient()
+  const supabase = await createServerClient();
 
   const { data, error } = await supabase
     .from("analyses")
     .select("*")
     .eq("patient_id", patientId)
-    .order("created_at", { ascending: false })
+    .order("created_at", { ascending: false });
 
   if (error) {
-    console.error("[v0] Error fetching patient analyses:", error)
-    return []
+    console.error("Error fetching patient analyses:", error);
+    return [];
   }
-
-  return (data as Analysis[]) || []
+  return (data as Analysis[]) || [];
 }
 
-// Follow-Ups
+/** ---------- follow-ups ---------- */
 export async function createFollowUp(
   doctorId: string,
   patientId: string,
   scheduledDate: string,
   notes?: string,
-  analysisId?: string,
+  analysisId?: string
 ): Promise<FollowUp> {
-  const supabase = await createServerClient()
+  const supabase = await createServerClient();
 
   const newFollowUp = {
     id: crypto.randomUUID(),
@@ -604,57 +368,53 @@ export async function createFollowUp(
     status: "scheduled" as const,
     notes: notes || null,
     outcome: null,
-  }
+  };
 
-  const { data, error } = await supabase.from("follow_ups").insert(newFollowUp).select().single()
-
+  const { data, error } = await supabase.from("follow_ups").insert(newFollowUp).select().single();
   if (error) {
-    console.error("[v0] Error creating follow-up:", error)
-    throw new Error("Ошибка создания записи на прием")
+    console.error("Error creating follow-up:", error);
+    throw new Error("Ошибка создания записи на прием");
   }
-
-  return data as FollowUp
+  return data as FollowUp;
 }
 
 export async function getFollowUpsByDoctor(doctorId: string): Promise<FollowUp[]> {
-  const supabase = await createServerClient()
+  const supabase = await createServerClient();
 
   const { data, error } = await supabase
     .from("follow_ups")
     .select("*")
     .eq("doctor_id", doctorId)
-    .order("scheduled_date", { ascending: true })
+    .order("scheduled_date", { ascending: true });
 
   if (error) {
-    console.error("[v0] Error fetching follow-ups:", error)
-    return []
+    console.error("Error fetching follow-ups:", error);
+    return [];
   }
-
-  return (data as FollowUp[]) || []
+  return (data as FollowUp[]) || [];
 }
 
 export async function getFollowUpsByPatient(patientId: string): Promise<FollowUp[]> {
-  const supabase = await createServerClient()
+  const supabase = await createServerClient();
 
   const { data, error } = await supabase
     .from("follow_ups")
     .select("*")
     .eq("patient_id", patientId)
-    .order("scheduled_date", { ascending: false })
+    .order("scheduled_date", { ascending: false });
 
   if (error) {
-    console.error("[v0] Error fetching patient follow-ups:", error)
-    return []
+    console.error("Error fetching patient follow-ups:", error);
+    return [];
   }
-
-  return (data as FollowUp[]) || []
+  return (data as FollowUp[]) || [];
 }
 
 export async function updateFollowUp(
   followUpId: string,
-  updates: Partial<Omit<FollowUp, "id" | "doctor_id" | "patient_id" | "created_at">>,
+  updates: Partial<Omit<FollowUp, "id" | "doctor_id" | "patient_id" | "created_at">>
 ): Promise<FollowUp> {
-  const supabase = await createServerClient()
+  const supabase = await createServerClient();
 
   const { data, error } = await supabase
     .from("follow_ups")
@@ -664,22 +424,21 @@ export async function updateFollowUp(
     })
     .eq("id", followUpId)
     .select()
-    .single()
+    .single();
 
   if (error) {
-    console.error("[v0] Error updating follow-up:", error)
-    throw new Error("Ошибка обновления записи")
+    console.error("Error updating follow-up:", error);
+    throw new Error("Ошибка обновления записи");
   }
-
-  return data as FollowUp
+  return data as FollowUp;
 }
 
 export async function getUpcomingFollowUps(doctorId: string, days = 7): Promise<FollowUp[]> {
-  const supabase = await createServerClient()
+  const supabase = await createServerClient();
 
-  const now = new Date()
-  const futureDate = new Date()
-  futureDate.setDate(futureDate.getDate() + days)
+  const now = new Date();
+  const futureDate = new Date();
+  futureDate.setDate(futureDate.getDate() + days);
 
   const { data, error } = await supabase
     .from("follow_ups")
@@ -688,56 +447,50 @@ export async function getUpcomingFollowUps(doctorId: string, days = 7): Promise<
     .eq("status", "scheduled")
     .gte("scheduled_date", now.toISOString())
     .lte("scheduled_date", futureDate.toISOString())
-    .order("scheduled_date", { ascending: true })
+    .order("scheduled_date", { ascending: true });
 
   if (error) {
-    console.error("[v0] Error fetching upcoming follow-ups:", error)
-    return []
+    console.error("Error fetching upcoming follow-ups:", error);
+    return [];
   }
-
-  return (data as FollowUp[]) || []
+  return (data as FollowUp[]) || [];
 }
 
-// Statistics functions for dashboard analytics
+/** ---------- statistics (fixed) ---------- */
 export async function getDoctorStatistics(doctorId: string): Promise<{
-  totalPatients: number
-  totalAnalyses: number
-  pneumoniaDetected: number
-  normalCases: number
-  analysesThisWeek: number
-  analysesThisMonth: number
-  recentAnalyses: Analysis[]
+  totalPatients: number;
+  totalAnalyses: number;
+  pneumoniaDetected: number;
+  normalCases: number;
+  analysesThisWeek: number;
+  analysesThisMonth: number;
+  recentAnalyses: Analysis[];
 }> {
-  const supabase = await createServerClient()
+  const supabase = await createServerClient();
 
-  // Get total patients
   const { count: totalPatients } = await supabase
     .from("patients")
     .select("*", { count: "exact", head: true })
-    .eq("doctor_id", doctorId)
+    .eq("doctor_id", doctorId);
 
-  // Get all analyses
   const { data: allAnalyses } = await supabase
     .from("analyses")
     .select("*")
     .eq("user_id", doctorId)
-    .order("created_at", { ascending: false })
+    .order("created_at", { ascending: false });
 
-  const analyses = (allAnalyses as Analysis[]) || []
+  const analyses = (allAnalyses as Analysis[]) ?? [];
 
-  // Calculate statistics
-  const pneumoniaDetected = analyses.filter((a) => a.diagnosis.toLowerCase().includes("пневмония")).length
-  const normalCases = analyses.length - pneumoniaDetected
+  const pneumoniaDetected = analyses.filter((a) => isPneumoniaDiagnosis(a.diagnosis)).length;
+  const normalCases = analyses.length - pneumoniaDetected;
 
-  // This week
-  const oneWeekAgo = new Date()
-  oneWeekAgo.setDate(oneWeekAgo.getDate() - 7)
-  const analysesThisWeek = analyses.filter((a) => new Date(a.created_at) >= oneWeekAgo).length
+  const oneWeekAgo = new Date();
+  oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+  const analysesThisWeek = analyses.filter((a) => new Date(a.created_at) >= oneWeekAgo).length;
 
-  // This month
-  const oneMonthAgo = new Date()
-  oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1)
-  const analysesThisMonth = analyses.filter((a) => new Date(a.created_at) >= oneMonthAgo).length
+  const oneMonthAgo = new Date();
+  oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+  const analysesThisMonth = analyses.filter((a) => new Date(a.created_at) >= oneMonthAgo).length;
 
   return {
     totalPatients: totalPatients || 0,
@@ -747,101 +500,42 @@ export async function getDoctorStatistics(doctorId: string): Promise<{
     analysesThisWeek,
     analysesThisMonth,
     recentAnalyses: analyses.slice(0, 10),
-  }
+  };
 }
 
 export async function getAnalysesTrend(
   doctorId: string,
-  days = 30,
-): Promise<
-  Array<{
-    date: string
-    pneumonia: number
-    normal: number
-  }>
-> {
-  const supabase = await createServerClient()
+  days = 30
+): Promise<Array<{ date: string; pneumonia: number; normal: number }>> {
+  const supabase = await createServerClient();
 
-  const startDate = new Date()
-  startDate.setDate(startDate.getDate() - days)
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
 
   const { data: analyses } = await supabase
     .from("analyses")
     .select("*")
     .eq("user_id", doctorId)
     .gte("created_at", startDate.toISOString())
-    .order("created_at", { ascending: true })
+    .order("created_at", { ascending: true });
 
-  if (!analyses || analyses.length === 0) {
-    return []
-  }
+  if (!analyses || analyses.length === 0) return [];
 
-  // Group by date
-  const groupedByDate: Record<string, { pneumonia: number; normal: number }> = {}
+  const groupedByDate: Record<string, { pneumonia: number; normal: number }> = {};
 
-  analyses.forEach((analysis: any) => {
-    const date = new Date(analysis.created_at).toISOString().split("T")[0]
-    if (!groupedByDate[date]) {
-      groupedByDate[date] = { pneumonia: 0, normal: 0 }
-    }
+  (analyses as Analysis[]).forEach((a) => {
+    const date = new Date(a.created_at).toISOString().split("T")[0];
+    if (!groupedByDate[date]) groupedByDate[date] = { pneumonia: 0, normal: 0 };
+    if (isPneumoniaDiagnosis(a.diagnosis)) groupedByDate[date].pneumonia++;
+    else groupedByDate[date].normal++;
+  });
 
-    if (analysis.diagnosis.toLowerCase().includes("пневмония")) {
-      groupedByDate[date].pneumonia++
-    } else {
-      groupedByDate[date].normal++
-    }
-  })
-
-  return Object.entries(groupedByDate).map(([date, counts]) => ({
-    date,
-    ...counts,
-  }))
+  return Object.entries(groupedByDate).map(([date, counts]) => ({ date, ...counts }));
 }
 
-
-// Image storage - convert to base64 data URL
-// Removed saveImage function as it's no longer needed (FileReader doesn't work server-side)
-// Image conversion is now handled directly in the API route using Node.js Buffer
-
-async function hashPassword(password: string): Promise<string> {
-  // Simple hash for demo - in production use bcrypt or similar
-  const encoder = new TextEncoder()
-  const data = encoder.encode(password + "salt_secret_key")
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data)
-  const hashArray = Array.from(new Uint8Array(hashBuffer))
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("")
-}
-
-async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  const passwordHash = await hashPassword(password)
-  return passwordHash === hash
-}
-
-/*export async function uploadImageToStorage(
-  userId: string,
-  fileBuffer: Buffer,
-  mimeType: string
-): Promise<string> {
-  const supabase = await createServerClient()
-  const bucket = "xray-images" // создадим его ниже
-  const ext = (mimeType.split("/")[1] || "jpg").toLowerCase()
-  const filePath = `${userId}/${Date.now()}.${ext}`
-
-  const { error: upErr } = await supabase
-    .storage
-    .from(bucket)
-    .upload(filePath, fileBuffer, {
-      contentType: mimeType,
-      upsert: false,
-    })
-  if (upErr) throw new Error(`Ошибка загрузки изображения: ${upErr.message}`)
-
-  const { data } = supabase.storage.from(bucket).getPublicUrl(filePath)
-  return data.publicUrl
-}
-*/
-
+/** ---------- storage upload ---------- */
 const STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || "pneumonia-images";
+
 export async function uploadImageToStorage(
   userId: string,
   buffer: Buffer,
@@ -849,22 +543,14 @@ export async function uploadImageToStorage(
   ext: string
 ): Promise<string> {
   const supabase = await createServerClient();
-
   const filename = `${userId}/${crypto.randomUUID()}.${ext}`;
 
-  const { data, error } = await supabase.storage
-    .from(STORAGE_BUCKET)
-    .upload(filename, buffer, {
-      contentType: mimeType,
-      upsert: false,
-    });
-
+  const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(filename, buffer, {
+    contentType: mimeType,
+    upsert: false,
+  });
   if (error) throw new Error(`Storage upload failed: ${error.message}`);
 
-  // If bucket is public:
-  const { data: pub } = supabase.storage
-    .from(STORAGE_BUCKET)
-    .getPublicUrl(filename);
-
+  const { data: pub } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(filename);
   return pub.publicUrl;
 }

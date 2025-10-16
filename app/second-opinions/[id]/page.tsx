@@ -182,7 +182,7 @@ export default function SecondOpinionDetailPage({ params }: SecondOpinionDetailP
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold">Детали запроса</h1>
-            <p className="text-xs text-muted-foreground">Второе мнение</p>
+            <p className="text-xs text-muted-foreground">Консультация</p>
           </div>
           <div className="flex gap-2">
             {opinion.status === "completed" && (

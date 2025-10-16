@@ -62,7 +62,7 @@ export function AnalysisResultCard({ result, patientName, patientAge, doctorName
           console.error("Error fetching second opinion:", error)
         }
       }
-      
+
       await generatePDFReport({
         diagnosis: result.diagnosis,
         confidence: result.confidence,
@@ -116,7 +116,7 @@ export function AnalysisResultCard({ result, patientName, patientAge, doctorName
       })
 
       if (response.ok) {
-        alert("Запрос на второе мнение отправлен успешно!")
+        alert("Запрос на консультацию отправлен успешно!")
         setIsDialogOpen(false)
         setSelectedDoctor("")
         setRequestNotes("")
@@ -144,14 +144,14 @@ export function AnalysisResultCard({ result, patientName, patientAge, doctorName
               <DialogTrigger asChild>
                 <Button variant="outline" size="sm">
                   <UserPlus className="w-4 h-4 mr-2" />
-                  Второе мнение
+                  Консультация
                 </Button>
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Запросить второе мнение</DialogTitle>
+                  <DialogTitle>Запросить консультацию</DialogTitle>
                   <DialogDescription>
-                    Отправьте этот анализ другому врачу для получения второго мнения
+                    Отправьте этот анализ другому врачу для получения консультации
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-4">
