@@ -213,7 +213,7 @@ export async function getAnalysesByUser(userId: string): Promise<Analysis[]> {
     .order("created_at", { ascending: false })
 
   if (error) {
-    console.error("[v0] Error fetching analyses:", error)
+    console.error("Error fetching analyses:", error)
     return []
   }
   return (data as Analysis[]) || []

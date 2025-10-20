@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await query
 
     if (error) {
-      console.error("[v0] Error fetching medical records:", error)
+      console.error("Error fetching medical records:", error)
       return NextResponse.json({ error: "Failed to fetch medical records" }, { status: 500 })
     }
 
@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
     const { data, error } = await supabase.from("medical_records").insert(newRecord).select().single()
 
     if (error) {
-      console.error("[v0] Error creating medical record:", error)
+      console.error("Error creating medical record:", error)
       return NextResponse.json({ error: "Failed to create medical record" }, { status: 500 })
     }
 
