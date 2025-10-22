@@ -3,8 +3,6 @@
 import type React from "react"
 
 import { useState, useRef, useEffect } from "react"
-import { useChat } from "@ai-sdk/react"
-import { DefaultChatTransport } from "ai"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -16,19 +14,17 @@ interface AIChatProps {
   result: AnalysisResult
 }
 
+interface ChatMessage {
+  id: string
+  role: "user" | "assistant"
+  content: string
+}
+
 export function AIChat({ result }: AIChatProps) {
   const [input, setInput] = useState("")
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [isLoading, setIsLoading] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
-
-  const { messages, sendMessage, status } = useChat({
-    transport: new DefaultChatTransport({
-      api: "/api/chat",
-      body: {
-        diagnosis: result.diagnosis,
-        confidence: result.confidence,
-      },
-    }),
-  })
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -36,11 +32,58 @@ export function AIChat({ result }: AIChatProps) {
     }
   }, [messages])
 
+  const sendMessage = async (text: string) => {
+    setIsLoading(true)
+    
+    const userMessage: ChatMessage = { 
+      id: Date.now().toString(), 
+      role: "user", 
+      content: text 
+    }
+    setMessages(prev => [...prev, userMessage])
+
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text,
+          diagnosis: result.diagnosis,
+          confidence: result.confidence
+        })
+      })
+      
+      if (!response.ok) {
+        throw new Error('API response not ok')
+      }
+      
+      const data = await response.json()
+      const assistantMessage: ChatMessage = { 
+        id: (Date.now() + 1).toString(), 
+        role: "assistant", 
+        content: data.message 
+      }
+      setMessages(prev => [...prev, assistantMessage])
+    } catch (error) {
+      console.error("Chat error:", error)
+      const errorMessage: ChatMessage = { 
+        id: (Date.now() + 1).toString(), 
+        role: "assistant", 
+        content: "Sorry, I encountered an error. Please try again." 
+      }
+      setMessages(prev => [...prev, errorMessage])
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim() || status === "in_progress") return
+    if (!input.trim() || isLoading) return
 
-    sendMessage({ text: input })
+    sendMessage(input)
     setInput("")
   }
 
@@ -82,16 +125,9 @@ export function AIChat({ result }: AIChatProps) {
                     message.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground border"
                   }`}
                 >
-                  {message.parts.map((part, index) => {
-                    if (part.type === "text") {
-                      return (
-                        <p key={index} className="text-sm leading-relaxed whitespace-pre-wrap">
-                          {part.text}
-                        </p>
-                      )
-                    }
-                    return null
-                  })}
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                    {message.content}
+                  </p>
                 </div>
 
                 {message.role === "user" && (
@@ -102,7 +138,7 @@ export function AIChat({ result }: AIChatProps) {
               </div>
             ))}
 
-            {status === "in_progress" && (
+            {isLoading && (
               <div className="flex gap-3 justify-start">
                 <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
                   <Bot className="w-4 h-4 text-primary" />
@@ -121,10 +157,10 @@ export function AIChat({ result }: AIChatProps) {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder={translations.askAI}
-              disabled={status === "in_progress"}
+              disabled={isLoading}
               className="flex-1"
             />
-            <Button type="submit" disabled={!input.trim() || status === "in_progress"} size="icon">
+            <Button type="submit" disabled={!input.trim() || isLoading} size="icon">
               <Send className="w-4 h-4" />
             </Button>
           </div>

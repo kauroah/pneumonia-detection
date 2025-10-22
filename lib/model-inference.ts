@@ -1,5 +1,8 @@
 // lib/model-inference.ts
 import path from "path";
+import { Buffer } from "node:buffer";
+
+type BufferLikeInput = Buffer<ArrayBufferLike> | ArrayBufferLike | Uint8Array;
 
 const isServer = typeof window === "undefined";
 
@@ -260,7 +263,13 @@ export async function runInference(
 }
 
 // ---------- PDFs ----------
-export async function convertPdfToImage(_pdfBuffer: Buffer): Promise<Buffer> {
-  // Not implemented yet. If needed later, we can add pdf-poppler or pdf-lib + canvas.
+export function convertPdfToImage(input: BufferLikeInput): Promise<Buffer>;
+// (overload for DX, optional)
+export function convertPdfToImage(input: Buffer): Promise<Buffer>;
+export async function convertPdfToImage(input: BufferLikeInput): Promise<Buffer> {
+  const buf: Buffer =
+    Buffer.isBuffer(input) ? input : Buffer.from(input as ArrayBufferLike);
+
+  // TODO: real PDF → image here, using `buf`
   throw new Error("PDF conversion not yet implemented. Please use PNG or JPEG images.");
 }

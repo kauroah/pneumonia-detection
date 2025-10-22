@@ -102,7 +102,9 @@ const formData = await request.formData()
     }
 
     // буфер исходного файла
-    const inputBuf = Buffer.from(await imageFile.arrayBuffer())
+// Force the narrower ArrayBuffer type so Buffer<T> becomes Buffer<ArrayBuffer>
+    const ab = (await imageFile.arrayBuffer()) as ArrayBuffer;
+    const inputBuf: Buffer = Buffer.from(ab);
     const mimeType = imageFile.type || "image/jpeg"
 
     // Если PDF — как у вас, конвертируйте (или верните 400)
@@ -110,7 +112,7 @@ const formData = await request.formData()
     const isPdf = imageFile.name.toLowerCase().endsWith(".pdf")
     if (isPdf) {
       try {
-        imageBuffer = await convertPdfToImage(inputBuf)
+        imageBuffer = await convertPdfToImage(inputBuf) 
       } catch {
         return NextResponse.json(
           { error: "PDF conversion not supported yet. Please use PNG or JPEG images." },
@@ -335,8 +337,10 @@ ${commonRules}
 4) Уход и режим (дыхательные упражнения, сон, гидратация, отказ от курения).
 5) График контрольных осмотров (5–6 временных точек в течение суток или недельный план для домашнего режима).`;
 
-    const { text } = await llm().gen({
-      prompt,
+    const { text } = await llm().generate({
+      messages: [
+        { role: "system", content: prompt },
+      ],
       maxOutputTokens: 900, // 15000 тормозит и может сыпать “форматный шум”
       temperature: 0.4,     // более детерминированный стиль
     });

@@ -184,7 +184,7 @@ export default function PatientDetailPage() {
                         </div>
                         <Button onClick={() => setShowAddRecordDialog(true)}>
                           <Plus className="w-4 h-4 mr-2" />
-                          Добавить запись
+                          Добавить анализ
                         </Button>
                       </div>
                     </CardHeader>
@@ -193,11 +193,11 @@ export default function PatientDetailPage() {
                         <div className="text-center py-12">
                           <Database className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
                           <p className="text-muted-foreground mb-4">
-                            База знаний пуста. Добавьте медицинские записи для отслеживания истории болезни.
+                            База знаний пуста. Добавьте медицинские анализы для отслеживания истории болезни.
                           </p>
                           <Button onClick={() => setShowAddRecordDialog(true)}>
                             <Plus className="w-4 h-4 mr-2" />
-                            Добавить первую запись
+                            Добавить первый анализ
                           </Button>
                         </div>
                       ) : (

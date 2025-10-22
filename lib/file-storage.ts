@@ -112,7 +112,7 @@ export async function createUser(email: string, password: string, fullName: stri
     email,
     password_hash: passwordHash,
     full_name: fullName,
-    role,
+    role: role as "doctor" | "nurse",
   }
 
   const { data, error } = await supabase.from("users").insert(newUser).select().single()

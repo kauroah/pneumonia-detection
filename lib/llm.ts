@@ -1,7 +1,12 @@
-import { generateText, streamText } from "ai";
-import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-// (Optional: keep DeepSeek as a backup if you ever top up credit)
-// import { deepseek } from "@ai-sdk/deepseek";
+interface GenerateOptions {
+  messages: Array<{ role: string; content: string }>;
+  temperature?: number;
+  maxOutputTokens?: number;
+}
+
+interface GenerateResult {
+  text: string;
+}
 
 export function llm() {
   const provider = process.env.AI_PROVIDER ?? "ollama";
@@ -10,46 +15,105 @@ export function llm() {
     const baseURL = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434/v1";
     const modelId = process.env.OLLAMA_MODEL ?? "qwen2.5:7b-instruct";
 
-    // `apiKey` is ignored by Ollama; `name` is just a label
-    const ollama = createOpenAICompatible({
-      name: "ollama",
-      baseURL,
-      apiKey: "ollama",
-    });
-
     return {
-      gen: (opts: Omit<Parameters<typeof generateText>[0], "model">) =>
-        generateText({ ...opts, model: ollama(modelId) }),
-      stream: (opts: Omit<Parameters<typeof streamText>[0], "model">) =>
-        streamText({ ...opts, model: ollama(modelId) }),
+      generate: async (opts: GenerateOptions): Promise<GenerateResult> => {
+        try {
+          const response = await fetch(`${baseURL}/chat/completions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: modelId,
+              messages: opts.messages,
+              temperature: opts.temperature || 0.3,
+              max_tokens: opts.maxOutputTokens || 900,
+              stream: false,
+            }),
+          });
+          
+          if (!response.ok) {
+            throw new Error(`Ollama API error: ${response.status}`);
+          }
+          
+          const data = await response.json();
+          return { text: data.choices[0]?.message?.content || "No response generated" };
+        } catch (error) {
+          console.error("Ollama API error:", error);
+          return { text: "Sorry, I encountered an error. Please try again." };
+        }
+      }
     };
   }
 
   if (provider === "groq") {
-    const groq = createOpenAICompatible({
-      name: "groq",
-      baseURL: "https://api.groq.com/openai/v1",
-      apiKey: process.env.GROQ_API_KEY!,
-    });
     return {
-      gen: (opts) => generateText({ ...opts, model: groq("llama-3.1-8b-instant") }),
-      stream: (opts) => streamText({ ...opts, model: groq("llama-3.1-8b-instant") }),
+      generate: async (opts: GenerateOptions): Promise<GenerateResult> => {
+        try {
+          const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: { 
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+            },
+            body: JSON.stringify({
+              model: "llama-3.1-8b-instant",
+              messages: opts.messages,
+              temperature: opts.temperature || 0.3,
+              max_tokens: opts.maxOutputTokens || 900,
+              stream: false,
+            }),
+          });
+          
+          if (!response.ok) {
+            throw new Error(`Groq API error: ${response.status}`);
+          }
+          
+          const data = await response.json();
+          return { text: data.choices[0]?.message?.content || "No response generated" };
+        } catch (error) {
+          console.error("Groq API error:", error);
+          return { text: "Sorry, I encountered an error. Please try again." };
+        }
+      }
     };
   }
 
   if (provider === "openrouter") {
-    const openrouter = createOpenAICompatible({
-      name: "openrouter",
-      baseURL: "https://openrouter.ai/api/v1",
-      apiKey: process.env.OPENROUTER_API_KEY!,
-    });
-    const model = "meta-llama/llama-3.1-8b-instruct:free";
     return {
-      gen: (opts) => generateText({ ...opts, model: openrouter(model) }),
-      stream: (opts) => streamText({ ...opts, model: openrouter(model) }),
+      generate: async (opts: GenerateOptions): Promise<GenerateResult> => {
+        try {
+          const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: { 
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`
+            },
+            body: JSON.stringify({
+              model: "meta-llama/llama-3.1-8b-instruct:free",
+              messages: opts.messages,
+              temperature: opts.temperature || 0.3,
+              max_tokens: opts.maxOutputTokens || 900,
+              stream: false,
+            }),
+          });
+          
+          if (!response.ok) {
+            throw new Error(`OpenRouter API error: ${response.status}`);
+          }
+          
+          const data = await response.json();
+          return { text: data.choices[0]?.message?.content || "No response generated" };
+        } catch (error) {
+          console.error("OpenRouter API error:", error);
+          return { text: "Sorry, I encountered an error. Please try again." };
+        }
+      }
     };
   }
 
   // Fallback: use Ollama
-  return llm();
+  return {
+    generate: async (opts: GenerateOptions): Promise<GenerateResult> => {
+      return { text: "AI service not configured properly" };
+    }
+  };
 }

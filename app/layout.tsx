@@ -5,7 +5,7 @@ import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Pneumonia AI Det',
+  title: 'Pneumonia AI Detection',
 }
 
 export default function RootLayout({
